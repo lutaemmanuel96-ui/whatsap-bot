@@ -1,7 +1,6 @@
 import express from 'express';
 import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import readline from 'readline';
 
 // --- EXPRESS SERVER FOR RENDER HEALTH CHECK ---
 const app = express();
@@ -15,12 +14,6 @@ app.listen(PORT, () => {
   console.log(`Express server is listening on port ${PORT}`);
 });
 
-// --- PAIRING CODE HELPER ---
-const question = (text) => {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => rl.question(text, (answer) => { rl.close(); resolve(answer); }));
-};
-
 // --- WHATSAPP BOT LOGIC ---
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
@@ -31,13 +24,20 @@ async function startBot() {
     printQRInTerminal: false
   });
 
-  // Request pairing code if not registered
+  // Automatically request pairing code using your phone number
   if (!sock.authState.creds.registered) {
-    const phoneNumber = await question('Please enter your WhatsApp phone number (e.g., 2547XXXXXXXX): ');
-    const code = await sock.requestPairingCode(phoneNumber.trim());
-    console.log(`\n==============================`);
-    console.log(`YOUR PAIRING CODE IS: ${code}`);
-    console.log(`==============================\n`);
+    const phoneNumber = "254759295183"; 
+    
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode(phoneNumber);
+        console.log(`\n==============================`);
+        console.log(`YOUR PAIRING CODE IS: ${code}`);
+        console.log(`==============================\n`);
+      } catch (error) {
+        console.error("Error getting pairing code:", error);
+      }
+    }, 3000); // Wait 3 seconds for connection to initialize
   }
 
   sock.ev.on('connection.update', (update) => {
@@ -55,7 +55,6 @@ async function startBot() {
 
   sock.ev.on('creds.update', saveCreds);
 
-  // Add your message handlers, commands, and status liking logic here
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const m = messages[0];
     if (!m.message || m.key.fromMe) return;
