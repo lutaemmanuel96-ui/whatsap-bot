@@ -2,6 +2,7 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeys
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import axios from 'axios';
+import { ADDRGETNETWORKPARAMS } from 'dns/promises';
 
 let replies = JSON.parse(fs.readFileSync('./replies.json', 'utf-8'));
 
@@ -113,7 +114,8 @@ async function startBot() {
 }
 
 startBot();
-const express = require('express');
+import express from 'express';
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
