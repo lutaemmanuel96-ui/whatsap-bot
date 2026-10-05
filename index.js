@@ -1,6 +1,7 @@
 import express from 'express';
 import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
 import pino from 'pino';
+import qrcode from 'qrcode-terminal';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,31 +20,22 @@ async function startBot() {
   const sock = makeWASocket({
     auth: state,
     logger: pino({ level: 'silent' }),
-    printQRInTerminal: false
+    printQRInTerminal: true
   });
 
-  if (!sock.authState.creds.registered) {
-    const phoneNumber = "254759295183"; 
-    setTimeout(async () => {
-      try {
-        const code = await sock.requestPairingCode(phoneNumber);
-        console.log(`\n==============================`);
-        console.log(`YOUR PAIRING CODE IS: ${code}`);
-        console.log(`==============================\n`);
-      } catch (error) {
-        console.error("Error getting pairing code:", error);
-      }
-    }, 4000);
-  }
-
   sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+    
+    if (qr) {
+      console.log('Scan the QR code below:');
+      qrcode.generate(qr, { small: true });
+    }
+
     if (connection === 'close') {
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log('Connection closed, reconnecting:', shouldReconnect);
+      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log('Connection closed, reconnecting...', shouldReconnect);
       if (shouldReconnect) {
-        setTimeout(() => startBot(), 5000);
+        startBot();
       }
     } else if (connection === 'open') {
       console.log('Bot connected successfully!');
