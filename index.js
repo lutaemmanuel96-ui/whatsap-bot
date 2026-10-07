@@ -1,12 +1,10 @@
 import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import axios from 'axios';
 
-const DB_FILE = 'jason.json'; // Your existing JSON memory file
+const DB_FILE = 'jason.json';
 
-// Helper to load or initialize learned auto-replies
 function loadMemory() {
   if (fs.existsSync(DB_FILE)) {
     try {
@@ -37,53 +35,41 @@ async function startBot() {
   });
 
   sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    if (qr) {
-      console.log('\nScan this QR code with WhatsApp:');
-      qrcode.generate(qr, { small: true });
-    }
+    const { connection, lastDisconnect } = update;
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
       if (shouldReconnect) startBot();
     } else if (connection === 'open') {
-      console.log('\n✅ Bot connected successfully, auto-features and learning active!');
+      console.log('✅ Bot connected successfully via QR Code!');
     }
   });
 
   sock.ev.on('creds.update', saveCreds);
 
-  // Message Handler
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
     const m = messages[0];
     if (!m.message) return;
     
     const senderID = m.key.remoteJid;
 
     // 1. Auto View Status and Auto-React Feature
-    if (senderID?.endsWith('@broadcast') || m.key.remoteJid?.endsWith('@broadcast')) {
-      const participant = m.key.participant || senderID;
-      console.log(`👁️ Auto-viewing status update from: ${participant}`);
-      
-      await sock.readMessages([m.key]);
+    if (senderID === 'status@broadcast' || senderID?.endsWith('@broadcast')) {
+      try {
+        await sock.readMessages([m.key]);
+        const emojis = ['❤️', '🥰', '🔥', '😎'];
+        const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-      const emojis = ['❤️', '🥰', '🔥', '😎'];
-      const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-      await sock.sendMessage(senderID, {
-        react: {
-          text: randomEmoji,
-          key: m.key
-        }
-      });
-      
-      console.log(`Reacted with ${randomEmoji} to status from ${participant}`);
+        await sock.sendMessage(senderID, {
+          react: { text: randomEmoji, key: m.key }
+        });
+      } catch (e) {}
       return;
     }
 
+    if (type !== 'notify') return;
     if (m.key.fromMe) return;
 
-    // 2. Auto Read Messages Feature
+    // 2. Auto Read Incoming Regular Messages
     await sock.readMessages([m.key]);
 
     const messageText = 
@@ -93,9 +79,8 @@ async function startBot() {
 
     if (!messageText) return;
     const lowerText = messageText.toLowerCase().trim();
-    console.log(`[Incoming] From ${senderID}: "${messageText}"`);
 
-    // 3. Learn Command ("learn keyword | response")
+    // 3. Learn Command
     if (lowerText.startsWith('learn ')) {
       const payload = messageText.slice(6).trim();
       const parts = payload.split('|');
@@ -109,7 +94,7 @@ async function startBot() {
         saveMemory(memory);
 
         await sock.sendMessage(senderID, { 
-          text: `✅ Learned successfully! When anyone says "${trigger}", I will now reply: "${reply}"` 
+          text: `✅ Learned! When anyone says "${trigger}", I will reply: "${reply}"` 
         });
       } else {
         await sock.sendMessage(senderID, { 
@@ -119,37 +104,29 @@ async function startBot() {
       return;
     }
 
-    // 4. Get Song Lyrics Command ("lyrics [song name]")
+    // 4. Lyrics Command (Updated to use lrclib.net)
     if (lowerText.startsWith('lyrics ')) {
       const query = messageText.slice(7).trim();
-      await sock.sendMessage(senderID, { text: `🔍 Searching lyrics for: *${query}*...` });
-
       try {
-        const res = await axios.get(`https://api.lyrics.ovh/v1/search?q=${encodeURIComponent(query)}`);
-        if (res.data && res.data.data && res.data.data.length > 0) {
-          const track = res.data.data[0];
-          const lyricsRes = await axios.get(`https://api.lyrics.ovh/v1/${track.artist.name}/${track.title}`);
-          
-          const lyricsContent = lyricsRes.data.lyrics || 'Lyrics found, but content is empty.';
-          const replyMessage = `🎵 *${track.title}* - *${track.artist.name}*:\n\n${lyricsContent.slice(0, 1500)}`;
+        const res = await axios.get(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`);
+        if (res.data && res.data.length > 0) {
+          const track = res.data[0];
+          const lyricsContent = track.plainLyrics || track.syncedLyrics || 'Lyrics content empty.';
+          const replyMessage = `🎵 *${track.trackName}* - *${track.artistName}*:\n\n${lyricsContent.slice(0, 1500)}`;
           await sock.sendMessage(senderID, { text: replyMessage });
         } else {
           await sock.sendMessage(senderID, { text: `Sorry, couldn't find lyrics for "${query}".` });
         }
       } catch (err) {
-        await sock.sendMessage(senderID, { text: '❌ Error fetching lyrics right now. Try again later.' });
+        await sock.sendMessage(senderID, { text: '❌ Error fetching lyrics right now.' });
       }
       return;
     }
 
-    // 5. Dynamic Auto-Reply from jason.json database
+    // 5. Dynamic Auto-Reply from database (Only replies if it matches a learned word)
     const memory = loadMemory();
     if (memory[lowerText]) {
       await sock.sendMessage(senderID, { text: memory[lowerText] });
-    } else {
-      await sock.sendMessage(senderID, { 
-        text: `I received: "${messageText}". Type *help* or teach me using *learn [word] | [reply]*!` 
-      });
     }
   });
 }
