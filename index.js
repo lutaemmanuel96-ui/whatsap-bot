@@ -2,6 +2,42 @@ import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeys
 import pino from 'pino';
 import fs from 'fs';
 import axios from 'axios';
+import express from 'express';
+import qrcode from 'qrcode';
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+let latestQR = '';
+
+// Basic web server to satisfy Render's port requirement and show QR code
+app.get('/', (req, res) => {
+  if (latestQR) {
+    res.send(`
+      <html>
+        <head><title>WhatsApp Bot QR</title></head>
+        <body style="text-align:center; font-family:sans-serif; margin-top:50px;">
+          <h2>Scan this QR code with WhatsApp</h2>
+          <img src="${latestQR}" alt="WhatsApp QR Code" style="width:300px;height:300px;" />
+          <p>Refresh page if expired.</p>
+        </body>
+      </html>
+    `);
+  } else {
+    res.send(`
+      <html>
+        <head><title>WhatsApp Bot QR</title></head>
+        <body style="text-align:center; font-family:sans-serif; margin-top:50px;">
+          <h2>Bot is starting or already connected!</h2>
+          <p>Check your WhatsApp or logs.</p>
+        </body>
+      </html>
+    `);
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`🌐 Web server running on port ${PORT}`);
+});
 
 const DB_FILE = 'jason.json';
 
@@ -31,16 +67,24 @@ async function startBot() {
   const sock = makeWASocket({
     auth: state,
     logger: pino({ level: 'silent' }),
-    printQRInTerminal: true
+    printQRInTerminal: false
   });
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+    
+    if (qr) {
+      // Convert QR string to an image data URL for web display
+      latestQR = await qrcode.toDataURL(qr);
+      console.log('📲 New QR Code generated! Open your Render URL in a browser to scan it.');
+    }
+
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
       if (shouldReconnect) startBot();
     } else if (connection === 'open') {
       console.log('✅ Bot connected successfully via QR Code!');
+      latestQR = ''; // Clear QR once connected
     }
   });
 
@@ -104,7 +148,7 @@ async function startBot() {
       return;
     }
 
-    // 4. Lyrics Command (Updated to use lrclib.net)
+    // 4. Lyrics Command (LRCLIB)
     if (lowerText.startsWith('lyrics ')) {
       const query = messageText.slice(7).trim();
       try {
@@ -123,7 +167,7 @@ async function startBot() {
       return;
     }
 
-    // 5. Dynamic Auto-Reply from database (Only replies if it matches a learned word)
+    // 5. Dynamic Auto-Reply from database
     const memory = loadMemory();
     if (memory[lowerText]) {
       await sock.sendMessage(senderID, { text: memory[lowerText] });
